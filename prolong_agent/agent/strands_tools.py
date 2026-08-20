@@ -213,14 +213,17 @@ def make_prolong_tools(workspace: str | Path) -> list:
             )
         if not _BWRAP:
             return "blocked: sandbox unavailable (bwrap missing); use the file tools."
-        argv = [*[_BWRAP], *_BWRAP_BASE, "--bind", str(ws), "/workspace",
-                "--chdir", "/workspace", "/bin/sh", "-c", command]
-        # `argv` is never evaluated by a host shell: shell=False and argv is a
-        # list, so bwrap is exec'd directly and the command is interpreted only
-        # inside the sandbox -- no network, read-only system, workspace-only writes.
+        sandbox_args = [*_BWRAP_BASE, "--bind", str(ws), "/workspace",
+                        "--chdir", "/workspace", "/bin/sh", "-c", command]
+        # The program executed is always bwrap (`executable=_BWRAP`, resolved once by
+        # shutil.which at import); `command` is not run by a host shell. shell=False
+        # and the arguments are a list, so nothing re-parses them here -- the command
+        # is first interpreted by /bin/sh *inside* the sandbox, which has no network,
+        # a read-only system, and only this game's workspace writable.
         try:
-            proc = subprocess.run(  # nosec B603  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
-                argv, cwd=str(ws), capture_output=True, text=True,
+            proc = subprocess.run(
+                ["bwrap", *sandbox_args], executable=_BWRAP,
+                cwd=str(ws), capture_output=True, text=True,
                 timeout=BASH_TIMEOUT_S,
                 env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/workspace", "LC_ALL": "C"},
             )

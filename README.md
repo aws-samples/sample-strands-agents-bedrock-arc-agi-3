@@ -35,9 +35,13 @@ game set, in competition mode.
 | score | **99.95%** |
 | levels | 183 / 183 |
 | environments | 25 / 25 |
+| cost | ~$830 (est.) |
 | scorecard | [`8a10b024-3560-448f-ac31-becc48affe5b`](https://arcprize.org/scorecards/8a10b024-3560-448f-ac31-becc48affe5b) |
 
 ## Our contribution
+
+We made four changes on top of [PRO-LONG](https://github.com/alexisfox7/PRO-LONG), which provides the game loop and the append-only log. We removed the game priors from the system prompt, built the Strands +
+Bedrock agent, put a sandbox around its tools, and added the recovery paths for reliability. We also provide [an analysis](#logtxt-access-pattern) on how the agent actually reads the log.
 
 ### 1. A generic system prompt
 
@@ -85,13 +89,14 @@ capped. If `bwrap` is unavailable the tool declines to run rather than execute u
 The agent has no network access, so it cannot look up the games or reach any service, and no
 access to cloud credentials. Its only channel back to the runner is `actions.json`.
 
-### 4. Reliability and observability
+### 4. Reliability
 
 - **Step-failure recovery** — three consecutive permanently-failing actions discard the
   stale plan and re-plan rather than ending the game on the first.
 - **Route retry on a stalled stream** — when a streaming call stops producing bytes without
   closing, the lane retries on another Bedrock inference profile or region for the same
   model. A client-side mitigation; prefer platform-level resilience where possible.
+
 ## Setup
 
 Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and `bubblewrap` for the sandbox.
@@ -169,6 +174,41 @@ small while history grows without bound, and the agent's own accumulated scripts
 memory. That idea, and the evidence for it, are PRO-LONG's; see
 [their paper](https://arxiv.org/abs/2607.20064).
 
+## Log.txt access pattern
+
+Because the board reaches the agent from a file, the agent ends
+up doing its own context engineering: every turn it decides which slice of a multi-megabyte log
+is worth loading, writes a program to extract that slice, and reasons over it.
+
+For example, In the [99.95% run](https://arcprize.org/scorecards/8a10b024-3560-448f-ac31-becc48affe5b) the Strands agent created 734 scripts, of which 260 open `logs.txt`. We
+classified those 260 into six access patterns. A script commonly matches several — one will
+locate a marker and then extract the board after it — so the counts below add up to more than 260.
+
+| Pattern | What the script does | # of script files | Games |
+|---|---|---|---|
+| `orient` | Measure the file, or look at the head of it | 133 | 23 / 25 |
+| `locate` | Find the line numbers of the action headers | 214 | 24 / 25 |
+| `extract` | Slice the lines after a marker and rebuild one 64×64 board | 127 | 21 / 25 |
+| `compare` | Diff two boards to see what a single action changed | 14 | 10 / 25 |
+| `aggregate` | Walk the whole history and tally something | 158 | 24 / 25 |
+| `recency` | Take only the newest board and ignore the rest | 102 | 22 / 25 |
+
+Three things follow that are worth knowing before building anything similar.
+
+**`locate` dominates, so the log needs line numbers, not search.** Four out of five
+log-reading scripts hunt for action headers. Every one of those hunts is a linear scan of a
+file that grows to tens of megabytes, because nothing in the format is indexed. An index
+keyed by action number would remove the most common operation in the workload.
+
+**Most reads want the present, not the past.** `recency` appears in 39% of scripts, and it is
+the cheapest possible query — the last 64 lines. The deep history is a minority of the
+traffic, though it is the valuable minority: replaying an earlier action to check a rule is
+what `compare` and `aggregate` exist for.
+
+**`comparing`** appears only in 5%
+of scripts and 10 of 25 games. It appears that the agent spends more effort reading the current board
+than checking whether the board it predicted matches the board the environment returned.
+
 ## Repository layout
 
 ```
@@ -178,7 +218,7 @@ prolong_agent/
     strands_tools.py      this project: six sandboxed tools
     swarm.py              PRO-LONG: 25-lane orchestrator + CLI  (modified)
     base.py               PRO-LONG: analyzer contract, actions.json parsing
-    prompts.py            PRO-LONG: system prompt               (priors removed)
+    prompts.py            PRO-LONG: system prompt               (modified to remove priors)
     action_queue.py       PRO-LONG
     game_state.py         PRO-LONG: board rendering, hint blocks
   environment/
