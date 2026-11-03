@@ -9,8 +9,9 @@ we do not have AGI".
 This project is a coding agent, built on the
 [Strands Agents SDK](https://strandsagents.com) and
 [Amazon Bedrock](https://aws.amazon.com/bedrock/), that plays those games and wins them. It
-starts each game with no idea what the buttons do or what it is looking at, and no statement
-of the objective. It figures out the goal and the rules by writing and running its own code
+starts each game with no idea what the buttons do or what it is looking at, and is told only
+to clear the levels in as few actions as possible. It figures out the controls and the rules by
+writing and running its own code
 against a log of everything it has done so far, forms hypotheses about the mechanics, tests
 them, keeps the scripts that prove useful, and plays until it wins. Each turn builds on the
 work of the last, rather than re-reading an ever-larger prompt.
@@ -53,6 +54,10 @@ to write `actions.json` — and leave the games themselves to the agent:
 - cell values are left unnamed: `HEX_COLOR_MAP` and `ASCII_COLOR_MAP` are empty
 - no game structure is asserted — no players, walls, goals, timers or step budgets
 - the opening line calls it an `unknown environment`, not a `grid-based puzzle game`
+
+What remains is generic guidance: solve all levels while minimizing total actions, a score
+increase means a level was cleared, `ACTION6` takes `(x, y)` coordinates in 0-63, `RESET`
+counts as an action, and parse the boards programmatically to test hypotheses.
 
 The agent works the rest out from its own log, which is what makes the same prompt serve
 all 25 games. It is in [`prolong_agent/agent/prompts.py`](prolong_agent/agent/prompts.py).
